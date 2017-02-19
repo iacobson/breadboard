@@ -88,11 +88,32 @@ defmodule Breadboard.Gpio.ServerTest do
         {:ok, :led_1, :off}
     end
 
+    test "cannot switch a component with wrong name" do
+      Server.new_output(:led_1, 17)
+
+      assert {:error, :led_x, _} =
+        Server.switch_on(:led_x)
+    end
+
+    test "cannot switch an input component" do
+      Server.new_input(:button, 17)
+
+      assert {:error, :button, _} =
+        Server.switch_on(:button)
+    end
+
     test "status/1" do
       Server.new_output(:led_1, 17)
       Server.switch_on(:led_1)
       assert Server.status(:led_1) ==
         {:ok, :led_1, :on}
+    end
+
+    test "cannot get status for wrong component name" do
+      Server.new_output(:led_1, 17)
+
+      assert {:error, :led_x, _} =
+        Server.status(:led_x)
     end
 
     test "create a button" do

@@ -23,18 +23,12 @@ defmodule Breadboard.Gpio.Server do
   def new(name, pin, io, group \\ nil) # function head
 
   def new(name, pin, io, group)
-    when is_atom(name) and is_integer(pin) and is_atom(io) and is_atom(group) do
+    when  is_atom(name) and
+          is_integer(pin) and
+          is_atom(io) and
+          is_atom(group) do
 
-    case component_valid?(pin, name) do
-      {:ok, _pin} ->
-        GenServer.call(__MODULE__, {:new, name, pin, io, group})
-      {:error, :pin, pin, name} ->
-        {:error, {:pin, "One component per pin. #{name} already started on pin #{pin}"}}
-      {:error, :name, pin, name} ->
-        {:error, {:name, "Name must be unique. #{name} already started on pin #{pin}"}}
-      _ ->
-        {:error, "component not created"}
-    end
+    component_valid?(name, pin, io, group)
   end
 
   def new(_, _, _, _), do: {:error, "Incorrect arguments"}
@@ -47,8 +41,6 @@ defmodule Breadboard.Gpio.Server do
     new(name, pin, :input, group)
   end
 
-  # same as new_input but checks if button already exists
-  # and enable elixir_ale set_int functionality with `:both`
   def new_button(name, pin, group \\ nil) do
     create_button(name, pin, group)
   end
@@ -93,32 +85,37 @@ defmodule Breadboard.Gpio.Server do
   end
 
 
-  # TODO: for termination you can use a combination of
-  # Gpio.release(pid)
-  # and
-  # Process.whereis(pid)
 
   # HELPERS
 
   defp switch(name, action, value) do
-    case @gpio.write(name, value) do
-      :ok ->
-        {:ok, name, action}
-      error ->
-        {:error, name, error}
+    components = current_components()
+
+    with  %Component{io: :output} <- Enum.find(components, &(&1.name == name)),
+          :ok <- @gpio.write(name, value) do
+      {:ok, name, action}
+    else
+      %Component{io: :input} -> {:error, name, "Switch works only for :output components"}
+      {:error, error} -> {:error, name, error}
+      _ -> {:error, name, "Could not find component #{name}"}
     end
   end
 
   defp get_status_for_name(name) do
-    case @gpio.read(name) do
-      0 ->
-        {:ok, name, :off}
-      1 ->
-        {:ok, name, :on}
-      error ->
-        {:error, name, error}
+    components = current_components()
+
+    with  %Component{} <- Enum.find(components, &(&1.name == name)),
+          status when is_integer(status) <- @gpio.read(name) do
+      {:ok, name, get_status(name, status)}
+    else
+      {:error, error} -> {:error, name, error}
+      _ -> {:error, name, "Cannot find component #{name}"}
     end
   end
+
+  defp get_status(_name, 0), do: :off
+  defp get_status(_name, status) when is_integer(status), do: :on
+  defp get_status(name, _), do: {:error, name, "Wrong status"}
 
   defp create_button(name, pin, group) do
     case new_input(name, pin, group) do
@@ -132,17 +129,17 @@ defmodule Breadboard.Gpio.Server do
     end
   end
 
-  defp component_valid?(pin, name) do
+  defp component_valid?(name, pin, io, group) do
     components = current_components()
 
     with  nil <- Enum.find(components, &(&1.name == name)),
           nil <- Enum.find(components, &(&1.pin == pin)) do
-      {:ok, pin}
+      GenServer.call(__MODULE__, {:new, name, pin, io, group})
     else
       %{name: ^name, pin: pin} ->
-        {:error, :name, pin, name}
+        {:error, {:name, "Name must be unique. #{name} already started on pin #{pin}"}}
       %{pin: ^pin, name: name} ->
-        {:error, :pin, pin, name}
+        {:error, {:pin, "One component per pin. #{name} already started on pin #{pin}"}}
       _ ->
         {:error, "component invalid"}
     end
